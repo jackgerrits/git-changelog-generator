@@ -38,7 +38,7 @@ Additional data can be provided as command line arguments to do things like spec
 
 If the data does not exist then the templating engine will simply ignore the value.
 
-## Examples
+## Example
 
 Given the following template file:
 ```
