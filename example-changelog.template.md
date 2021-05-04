@@ -1,7 +1,11 @@
 # Changelist
 Version: {{version}}
 
-{{#commit_list}}
-- {{commit}} {{author}}
+{{#commits}}
+- {{commit}} {{author_name}}
   - {{subject}}
-{{/commit_list}}
+{{/commits}}
+
+{{#authors}}
+- {{name}}
+{{/authors}}

@@ -4,60 +4,58 @@ import subprocess
 import textwrap
 
 import chevron
+import git
 
 
-def try_decode(binary_object):
-    return binary_object.decode("utf-8") if binary_object is not None else None
-
-
-def get_list_of_commits(range):
-    result = subprocess.run((
-        f"git log --format=__START_LOG_ENTRY__START_SUBJECT%s__END_SUBJECT__START_COMMITHASH%H__END_COMMITHASH__START_COMMITAUTHOR%an__END_COMMITAUTHOR__START_COMMITBODY%b__END_COMMITBODY {range}"
-    ).split(),
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT)
-
-    if result.returncode != 0:
-        error = try_decode(result.stdout)
-        message = textwrap.indent(error, '\t')
-        print(
-            f"Error: git log failed with the following message: \n {message}")
-        exit(1)
-
-    info = try_decode(result.stdout)
-    # skip the first empty string
-    info = info.split("__START_LOG_ENTRY")[1:]
-
-    commits = []
-    for commit in info:
-        m = re.search(
-            r'__START_SUBJECT([\s\S]*)__END_SUBJECT__START_COMMITHASH([\s\S]+)__END_COMMITHASH__START_COMMITAUTHOR([\s\S]*)__END_COMMITAUTHOR__START_COMMITBODY([\s\S]*)__END_COMMITBODY',
-            commit)
-
-        if not m:
-            raise RuntimeError(f'Could not parse commit: "{commit}""')
+def extract_info_from_commits(commits):
+    extracted_commits = []
+    for commit in commits:
+        message_lines = commit.message.splitlines()
+        subject = message_lines[0]
+        body = "\n".join(message_lines[1:])
 
         item = dict()
-        item['subject'] = m.group(1)
-        item['commit'] = m.group(2)
-        item['author'] = m.group(3)
-        item['body'] = m.group(4)
+        item['subject'] = subject
+        item['commit'] = commit.hexsha
+        item['author_name'] = commit.author.name
+        item['author_email'] = commit.author.email
+        item['body'] = body
 
-        pr_num_match = re.search(r'\(#([1-9]+)\)', item['subject'])
-        if pr_num_match:
-            item['pr_num'] = pr_num_match.group(1)
+        match_type_and_pr_num = re.search(r'^([a-zA-Z]+)(\!?):.+\(#([0-9]+)\)$', subject)
+        if match_type_and_pr_num:
+            item['type'] = match_type_and_pr_num.group(1)
+            item['breaking'] = match_type_and_pr_num.group(2) == "!"
+            item['pr_num'] = match_type_and_pr_num.group(3)
         else:
-            item['pr_num'] = "unknown"
+            # If type isn't found try just extracting the PR number.
+            match_pr_num = re.search(r'^.+\(#([0-9]+)\)$', subject)
+            if match_pr_num:
+                item['pr_num'] = match_pr_num.group(1)
+                item['breaking'] = False
+                item['type'] = "unknown"
+            else:
+                item['type'] = "unknown"
+                item['breaking'] = False
+                item['pr_num'] = "unknown"
+        extracted_commits.append(item)
+    return extracted_commits
 
-        commits.append(item)
 
-    return commits
+def extract_authors_from_commits(commits):
+    authors_seen = set()
+    authors = []
+    for commit in commits:
+        if commit.author.name not in authors_seen:
+            authors.append({"name": commit.author.name,
+                           "email": commit.author.email})
+            authors_seen.add(commit.author.name)
+
+    return authors
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description=
-        'Extract commits from a git repo and format according to template')
+        description='Extract commits from a git repo and format according to template')
     parser.add_argument('--file',
                         "-f",
                         type=str,
@@ -68,24 +66,50 @@ def main():
                         type=str,
                         required=True,
                         help='git log range to extract commits for')
+    parser.add_argument('--dir',
+                        '-d',
+                        type=str,
+                        required=True,
+                        help='directory of repo to read commits from')
     parser.add_argument(
         '--additional_data',
         "-c",
         type=str,
         default=[],
         action='append',
-        help=
-        'Additional data values pass to template, must be in the form key=value'
+        help='Additional data values pass to template, must be in the form key=value'
     )
     args = parser.parse_args()
 
-    commits = get_list_of_commits(args.range)
+    repo = git.Repo(args.dir)
+    commit_list = list(repo.iter_commits(args.range, max_count=None))
+    commits_with_extracted_info = extract_info_from_commits(commit_list)
+    authors = extract_authors_from_commits(commit_list)
+
+    def commits_by_type(commit_type):
+        return  [commit for commit in commits_with_extracted_info if commit["type"] == commit_type]
+
+    data = {
+        'commits': commits_with_extracted_info,
+        "authors": authors,
+        "unknown_type_commits": commits_by_type("unknown"),
+        "feat_type_commits": commits_by_type("feat"),
+        "fix_type_commits": commits_by_type("fix"),
+        "docs_type_commits": commits_by_type("docs"),
+        "style_type_commits": commits_by_type("style"),
+        "refactor_type_commits": commits_by_type("refactor"),
+        "perf_type_commits": commits_by_type("perf"),
+        "test_type_commits": commits_by_type("test"),
+        "build_type_commits": commits_by_type("build"),
+        "ci_type_commits": commits_by_type("ci"),
+        "chore_type_commits": commits_by_type("chore"),
+        "revert_type_commits": commits_by_type("revert"),
+    }
 
     template_file = args.file
     with open(template_file, "r") as f:
         template_contents = f.read()
 
-        data = {'commit_list': commits}
         for val in args.additional_data:
             if '=' in val and val.count('=') == 1:
                 components = val.split("=")

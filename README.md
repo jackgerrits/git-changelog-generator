@@ -2,7 +2,8 @@
 Easily generate a changelog for a git repository by filling in a template file.
 
 ```
-usage: git-changelog-generator.py [-h] --file FILE --range RANGE [--additional_data ADDITIONAL_DATA]
+usage: git-changelog-generator.py [-h] --file FILE --range RANGE --dir DIR
+                                  [--additional_data ADDITIONAL_DATA]
 
 Extract commits from a git repo and format according to template
 
@@ -11,6 +12,7 @@ optional arguments:
   --file FILE, -f FILE  Template file to process
   --range RANGE, -r RANGE
                         git log range to extract commits for
+  --dir DIR, -d DIR     directory of repo to read commits from
   --additional_data ADDITIONAL_DATA, -c ADDITIONAL_DATA
                         Additional data values pass to template, must be in the form key=value
 ```
@@ -21,18 +23,40 @@ Note: The program assumes the current working directory is the in the git reposi
 - A commit range - `HEAD~4..HEAD` or `1.1.0..2.0.0`
 - A number of commits `-n 4`
 
-
 ## Templating
 The Python implementation, [Chevron](https://github.com/noahmorrison/chevron), of the [{{ Mustache }}](https://mustache.github.io/) template specification is used.
 
 The input file is processed and according to the Mustache syntax. The values available in the template are a list of commits that are extracted from the git log as well as additional data that can be provided on the command line.
 
-- `commit_list` - list, each item in the list contains:
-    - `subject` - Subject line of commit
-    - `commit` - Full commit hash
-    - `author` - Author name
-    - `body` - Full body of commit
-    - `pr_num` - Extracted from commits where the subject contiains `(#XXXX)`
+A `commit` contains the following fields:
+- `subject` - Subject line of commit
+- `commit` - Full commit hash
+- `author_name` - Author name
+- `author_email` - Author email
+- `body` - Full body of commit
+- `type` - Semantic PR type of commit
+- `breaking` - If this is a breaking change, boolean
+- `pr_num` - Extracted from commits where the subject contiains `(#XXXX)`
+
+An `author` contains the following fields:
+- `name` - Author name
+- `email` - Author email
+
+Data passed to template is as follows:
+- `commits` - list, each item of type `commit`
+- `authors` - list, each item of type `author`
+- `unknown_type_commits` - list, each time of type `commit`, where `type` field == `unknown`
+- `feat_type_commits` - list, each time of type `commit`, where `type` field == `feat`
+- `fix_type_commits` - list, each time of type `commit`, where `type` field == `fix`
+- `docs_type_commits` - list, each time of type `commit`, where `type` field == `docs`
+- `style_type_commits` - list, each time of type `commit`, where `type` field == `style`
+- `refactor_type_commits` - list, each time of type `commit`, where `type` field == `refactor`
+- `perf_type_commits` - list, each time of type `commit`, where `type` field == `perf`
+- `test_type_commits` - list, each time of type `commit`, where `type` field == `test`
+- `build_type_commits` - list, each time of type `commit`, where `type` field == `build`
+- `ci_type_commits` - list, each time of type `commit`, where `type` field == `ci`
+- `chore_type_commits` - list, each time of type `commit`, where `type` field == `chore`
+- `revert_type_commits` - list, each time of type `commit`, where `type` field == `revert`
 
 Additional data can be provided as command line arguments to do things like specify a release version in the template. The `-c` argument must be passed as a `key=value` pair. For values to have spaces then just surround the entire argument in quotes `-c "key=value"`.
 
@@ -45,10 +69,10 @@ Given the following template file:
 # Changelist
 Version: {{version}}
 
-{{#commit_list}}
-- {{commit}} {{author}}
+{{#commits}}
+- {{commit}} {{author_name}}
   - {{subject}}
-{{/commit_list}}
+{{/commits}}
 ```
 
 Running the following command:
